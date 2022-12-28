@@ -151,8 +151,9 @@ enum {
 };
 
 enum {
-  CLASS_HID = 0x03,
-  CLASS_HUB = 0x09,
+  CLASS_HID  = 0x03,
+  CLASS_HUB  = 0x09,
+  CLASS_XPAD = 0xff,
 };
 
 enum {
