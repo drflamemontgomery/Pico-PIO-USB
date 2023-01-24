@@ -908,6 +908,10 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
         printf("\t\t\tepaddr:0x%02x, attr:%d, size:%d, interval:%d\n",
                d->epaddr, d->attr, d->max_size[0] | (d->max_size[1] << 8),
                d->interval);
+        /*printf("class: ");
+        if(class == CLASS_HID || class == CLASS_HUB) { printf("%s", class == CLASS_HID ? "HID" : "HUB"); }
+        else { printf("%d", class); }
+        printf("\n");*/
 
         if ((class == CLASS_HID || class == CLASS_HUB || class == CLASS_XPAD) &&
             d->attr == EP_ATTR_INTERRUPT) {
@@ -974,9 +978,11 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
         break;
     }
 
+
     configuration_descrptor_length -= descriptor[0];
     descriptor += descriptor[0];
   }
+  
   if(run_callback) { pio_hid_connect_host_cb(device); }
 
   for (int epidx = 0; epidx < PIO_USB_DEV_EP_CNT; epidx++) {
