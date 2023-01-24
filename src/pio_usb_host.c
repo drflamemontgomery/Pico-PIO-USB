@@ -143,19 +143,14 @@ static void __no_inline_not_in_flash_func(configure_fullspeed_host)(
   override_pio_program(pp->pio_usb_tx, &usb_tx_fs_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
 
-  override_pio_rx_program(pp->pio_usb_rx, &usb_rx_fs_program,
-                          &usb_rx_fs_debug_program, pp->offset_rx,
-                          pp->debug_pin_rx);
-  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_rx, pp->clk_div_fs_rx);
+  pio_sm_set_jmp_pin(pp->pio_usb_rx, pp->sm_rx, port->pin_dp);
+  SM_SET_CLKDIV_MAXSPEED(pp->pio_usb_rx, pp->sm_rx);
 
-  override_pio_rx_program(pp->pio_usb_rx, &eop_detect_fs_program,
-                          &eop_detect_fs_debug_program, pp->offset_eop,
-                          pp->debug_pin_eop);
+  pio_sm_set_jmp_pin(pp->pio_usb_rx, pp->sm_eop, port->pin_dm);
+  pio_sm_set_in_pins(pp->pio_usb_rx, pp->sm_eop, port->pin_dp);
   SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_eop, pp->clk_div_fs_rx);
 
   usb_tx_configure_pins(pp->pio_usb_tx, pp->sm_tx, port->pin_dp);
-  usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_eop, port->pin_dp);
-  usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_rx, port->pin_dp);
 }
 
 static void __no_inline_not_in_flash_func(configure_lowspeed_host)(
@@ -163,19 +158,14 @@ static void __no_inline_not_in_flash_func(configure_lowspeed_host)(
   override_pio_program(pp->pio_usb_tx, &usb_tx_ls_program, pp->offset_tx);
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_ls_tx);
 
-  override_pio_rx_program(pp->pio_usb_rx, &usb_rx_ls_program,
-                          &usb_rx_ls_debug_program, pp->offset_rx,
-                          pp->debug_pin_rx);
-  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_rx, pp->clk_div_ls_rx);
+  pio_sm_set_jmp_pin(pp->pio_usb_rx, pp->sm_rx, port->pin_dm);
+  SM_SET_CLKDIV_MAXSPEED(pp->pio_usb_rx, pp->sm_rx);
 
-  override_pio_rx_program(pp->pio_usb_rx, &eop_detect_ls_program,
-                          &eop_detect_ls_debug_program, pp->offset_eop,
-                          pp->debug_pin_eop);
+  pio_sm_set_jmp_pin(pp->pio_usb_rx, pp->sm_eop, port->pin_dp);
+  pio_sm_set_in_pins(pp->pio_usb_rx, pp->sm_eop, port->pin_dm);
   SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_eop, pp->clk_div_ls_rx);
 
   usb_tx_configure_pins(pp->pio_usb_tx, pp->sm_tx, port->pin_dp);
-  usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_eop, port->pin_dp);
-  usb_rx_configure_pins(pp->pio_usb_rx, pp->sm_rx, port->pin_dm);
 }
 
 static void __no_inline_not_in_flash_func(configure_root_port)(
@@ -193,7 +183,7 @@ static void __no_inline_not_in_flash_func(restore_fs_bus)(const pio_port_t *pp) 
   SM_SET_CLKDIV(pp->pio_usb_tx, pp->sm_tx, pp->clk_div_fs_tx);
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, false);
-  SM_SET_CLKDIV(pp->pio_usb_rx, pp->sm_rx, pp->clk_div_fs_rx);
+  SM_SET_CLKDIV_MAXSPEED(pp->pio_usb_rx, pp->sm_rx);
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_rx, true);
 
   pio_sm_set_enabled(pp->pio_usb_rx, pp->sm_eop, false);
@@ -423,11 +413,12 @@ bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address,
     return false;
   }
 
-  // control endpoint switch direction when switch stage
-  if (ep->ep_num != ep_address) {
+  // Control endpoint, address may switch between 0x00 <-> 0x80
+  // therefore we need to update ep_num and is_tx
+  if ((ep_address & 0x7f) == 0) {
     ep->ep_num = ep_address;
-    ep->data_id = 1; // data and status always start with DATA1
     ep->is_tx = (ep_address == 0) ? true : false;
+    ep->data_id = 1; // data and status always start with DATA1
   }
 
   return pio_usb_ll_transfer_start(ep, buffer, buflen);
@@ -982,7 +973,6 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
         printf("\n");
         stdio_flush();
         run_callback = true; 
-        //pio_hid_connect_host_cb(device);
       } break;
       default:
         break;
@@ -992,14 +982,8 @@ static int enumerate_device(usb_device_t *device, uint8_t address) {
     configuration_descrptor_length -= descriptor[0];
     descriptor += descriptor[0];
   }
-  if(run_callback) { pio_hid_connect_host_cb(device);
-    printf("vid:0x%04X, pid:0x%04X, \n", device->vid, device->pid);
-    printf("connected: %d\n", device->connected);
-    printf("MAX EP: 0x%02X\n", PIO_USB_DEV_EP_CNT);
-    for(int i = 0; i < PIO_USB_DEV_EP_CNT; i++) {
-      printf("EP ADDR: %02x\n", device->endpoint_id[i]);
-    }
-  }
+  
+  if(run_callback) { pio_hid_connect_host_cb(device); }
 
   for (int epidx = 0; epidx < PIO_USB_DEV_EP_CNT; epidx++) {
     endpoint_t *ep = pio_usb_get_endpoint(device, epidx);
