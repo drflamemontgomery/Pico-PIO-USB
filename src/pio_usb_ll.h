@@ -8,6 +8,7 @@
 #include "hardware/pio.h"
 #include "pio_usb_configuration.h"
 #include "usb_definitions.h"
+#include <stdint.h>
 
 enum {
   PIO_USB_INTS_CONNECT_POS = 0,
@@ -19,6 +20,7 @@ enum {
   PIO_USB_INTS_ENDPOINT_COMPLETE_POS,
   PIO_USB_INTS_ENDPOINT_ERROR_POS,
   PIO_USB_INTS_ENDPOINT_STALLED_POS,
+  PIO_USB_INTS_ENDPOINT_CONTINUE_POS,
 };
 
 #define PIO_USB_INTS_CONNECT_BITS (1u << PIO_USB_INTS_CONNECT_POS)
@@ -33,6 +35,8 @@ enum {
 #define PIO_USB_INTS_ENDPOINT_ERROR_BITS (1u << PIO_USB_INTS_ENDPOINT_ERROR_POS)
 #define PIO_USB_INTS_ENDPOINT_STALLED_BITS                                     \
   (1u << PIO_USB_INTS_ENDPOINT_STALLED_POS)
+#define PIO_USB_INTS_ENDPOINT_CONTINUE_BITS                                     \
+  (1u << PIO_USB_INTS_ENDPOINT_CONTINUE_POS)
 
 typedef enum {
   PORT_PIN_SE0 = 0b00,
@@ -57,12 +61,18 @@ typedef struct {
   uint offset_rx;
   uint sm_eop;
   uint offset_eop;
+  uint tx_reset_instr;
+  uint tx_start_instr;
   uint rx_reset_instr;
   uint rx_reset_instr2;
   uint device_rx_irq_num;
 
   int8_t debug_pin_rx;
   int8_t debug_pin_eop;
+
+  const pio_program_t *fs_tx_program;
+  const pio_program_t *fs_tx_pre_program;
+  const pio_program_t *ls_tx_program;
 
   pio_clk_div_t clk_div_fs_tx;
   pio_clk_div_t clk_div_fs_rx;
@@ -99,9 +109,8 @@ extern pio_port_t pio_port[1];
 // Bus functions
 //--------------------------------------------------------------------+
 
-#define IRQ_TX_EOP_MASK (1 << usb_tx_fs_IRQ_EOP)
-#define IRQ_TX_COMP_MASK (1 << usb_tx_fs_IRQ_COMP)
-#define IRQ_TX_ALL_MASK (IRQ_TX_EOP_MASK | IRQ_TX_COMP_MASK)
+#define IRQ_TX_EOP_MASK (1 << IRQ_TX_EOP)
+#define IRQ_TX_ALL_MASK (IRQ_TX_EOP_MASK)
 #define IRQ_RX_COMP_MASK (1 << IRQ_RX_EOP)
 #define IRQ_RX_ALL_MASK                                             \
   ((1 << IRQ_RX_EOP) | (1 << IRQ_RX_BS_ERR) | (1 << IRQ_RX_START) | \
@@ -151,6 +160,15 @@ pio_usb_ll_get_transaction_len(endpoint_t *ep) {
   return (remaining < ep->size) ? remaining : ep->size;
 }
 
+enum {
+  PIO_USB_TX_ENCODED_DATA_SE0 = 0,
+  PIO_USB_TX_ENCODED_DATA_K = 1,
+  PIO_USB_TX_ENCODED_DATA_COMP = 2,
+  PIO_USB_TX_ENCODED_DATA_J = 3,
+};
+uint8_t pio_usb_ll_encode_tx_data(uint8_t const *buffer, uint8_t buffer_len,
+                                  uint8_t *encoded_data);
+
 //--------------------------------------------------------------------
 // Host Controller functions
 //--------------------------------------------------------------------
@@ -170,6 +188,8 @@ bool pio_usb_host_send_setup(uint8_t root_idx, uint8_t device_address,
 bool pio_usb_host_endpoint_transfer(uint8_t root_idx, uint8_t device_address,
                                     uint8_t ep_address, uint8_t *buffer,
                                     uint16_t buflen);
+bool pio_usb_host_endpoint_abort_transfer(uint8_t root_idx, uint8_t device_address,
+                                          uint8_t ep_address);
 
 //--------------------------------------------------------------------
 // Device Controller functions
